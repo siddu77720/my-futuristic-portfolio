@@ -1,5 +1,62 @@
 document.addEventListener('DOMContentLoaded', () => {
 
+    // 0. Loading Splash Screen (time-based smooth easing, zero main-thread stutter)
+    const splashScreen = document.getElementById('splash-screen');
+    const splashBarFill = document.getElementById('splash-bar-fill');
+    const splashStatus = document.getElementById('splash-status');
+
+    if (splashScreen) {
+        let splashDismissed = false;
+        let isLoaded = document.readyState === 'complete';
+        let progress = 0;
+        const startTime = performance.now();
+        let lastTime = startTime;
+        const durationMs = 1100;
+
+        const finishSplash = () => {
+            if (splashDismissed) return;
+            splashDismissed = true;
+            if (splashBarFill) splashBarFill.style.transform = 'scaleX(1)';
+            if (splashStatus) splashStatus.textContent = 'Ready';
+            setTimeout(() => {
+                splashScreen.classList.add('fade-out');
+                splashScreen.setAttribute('aria-hidden', 'true');
+                document.body.classList.remove('splash-active');
+            }, 140);
+        };
+
+        const tick = (now) => {
+            if (splashDismissed) return;
+            const elapsed = now - startTime;
+            const dt = Math.min(50, now - lastTime);
+            lastTime = now;
+
+            const t = Math.min(1, elapsed / durationMs);
+            // Smooth cubic ease-out curve from 0 -> 1 without stalling
+            const eased = 1 - Math.pow(1 - t, 3);
+            const target = isLoaded ? eased : Math.min(0.92, eased * 0.92);
+
+            const factor = 1 - Math.exp(-dt * 0.018);
+            progress += (target - progress) * factor;
+            if (splashBarFill) {
+                splashBarFill.style.transform = `scaleX(${Math.min(1, progress).toFixed(4)})`;
+            }
+
+            if (isLoaded && t >= 1 && progress >= 0.992) {
+                finishSplash();
+                return;
+            }
+            requestAnimationFrame(tick);
+        };
+
+        window.addEventListener('load', () => {
+            isLoaded = true;
+        });
+
+        requestAnimationFrame(tick);
+        setTimeout(finishSplash, 2000);
+    }
+
     // 1. Mobile Menu Toggle
     const hamburger = document.querySelector('.hamburger');
     const navLinks = document.querySelector('.nav-links');
@@ -140,6 +197,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (certsGrid) {
+        const thumbObserver = 'IntersectionObserver' in window
+            ? new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (!entry.isIntersecting) return;
+                    const card = entry.target;
+                    const photo = card.dataset.certPhoto;
+                    const previewBox = card.querySelector('.cert-preview-box');
+                    const thumbCanvas = card.querySelector('.cert-thumb-canvas');
+                    if (photo && previewBox && thumbCanvas) {
+                        const img = new Image();
+                        img.onload = () => {
+                            drawProtectedCanvas(thumbCanvas, img);
+                            previewBox.classList.add('has-image');
+                        };
+                        img.src = photo;
+                    }
+                    observer.unobserve(card);
+                });
+            }, { rootMargin: '350px 0px' })
+            : null;
+
         certificates.forEach((cert, index) => {
             const delayClass = index % 4 === 0 ? '' : ` delay-${index % 4}`;
             const card = document.createElement('div');
@@ -148,6 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
             card.setAttribute('role', 'button');
             card.setAttribute('aria-label', `View ${cert.title} certificate`);
             card.dataset.certId = cert.id;
+            card.dataset.certPhoto = cert.photo || '';
 
             card.innerHTML = `
                 <div class="cert-card-top">
@@ -167,10 +246,11 @@ document.addEventListener('DOMContentLoaded', () => {
             card.querySelector('h4').textContent = cert.title;
             card.querySelector('.cert-info span').textContent = cert.issuer;
 
-            const previewBox = card.querySelector('.cert-preview-box');
-            const thumbCanvas = card.querySelector('.cert-thumb-canvas');
-
-            if (cert.photo && previewBox && thumbCanvas) {
+            if (thumbObserver) {
+                thumbObserver.observe(card);
+            } else if (cert.photo) {
+                const previewBox = card.querySelector('.cert-preview-box');
+                const thumbCanvas = card.querySelector('.cert-thumb-canvas');
                 const img = new Image();
                 img.onload = () => {
                     drawProtectedCanvas(thumbCanvas, img);
